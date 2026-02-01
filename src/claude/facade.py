@@ -385,6 +385,27 @@ class ClaudeIntegration:
             **tool_usage,
         }
 
+    async def cancel_active_operations(self, user_id: int) -> bool:
+        """Cancel all active Claude operations for a user.
+
+        Args:
+            user_id: The user's ID to cancel operations for
+
+        Returns:
+            True if operations were cancelled, False otherwise
+        """
+        logger.info("Cancelling active operations", user_id=user_id)
+
+        # Kill all active processes (this is a global stop)
+        # In a multi-user scenario, you might want to track which user owns which process
+        try:
+            await self.manager.kill_all_processes()
+            logger.info("Successfully cancelled all active operations", user_id=user_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to cancel operations", user_id=user_id, error=str(e))
+            return False
+
     async def shutdown(self) -> None:
         """Shutdown integration and cleanup resources."""
         logger.info("Shutting down Claude integration")

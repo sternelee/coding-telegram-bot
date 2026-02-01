@@ -27,7 +27,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"• `/projects` - Show available projects\n"
         f"• `/status` - Show session status\n"
         f"• `/actions` - Show quick actions\n"
-        f"• `/git` - Git repository commands\n\n"
+        f"• `/git` - Git repository commands\n"
+        f"• `/cancel` - Cancel active operations\n\n"
         f"**Quick Start:**\n"
         f"1. Use `/projects` to see available projects\n"
         f"2. Use `/cd <project>` to navigate to a project\n"
@@ -79,7 +80,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• `/status` - Show session and usage status\n"
         "• `/export` - Export session history\n"
         "• `/actions` - Show context-aware quick actions\n"
-        "• `/git` - Git repository information\n\n"
+        "• `/git` - Git repository information\n"
+        "• `/cancel` - Cancel active operations\n\n"
         "**Usage Examples:**\n"
         "• `cd myproject` - Enter project directory\n"
         "• `ls` - See what's in current directory\n"
@@ -97,6 +99,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "**Tips:**\n"
         "• Use specific, clear requests for best results\n"
         "• Check `/status` to monitor your usage\n"
+        "• Use `/cancel` if Claude is taking too long\n"
         "• Use quick action buttons when available\n"
         "• File uploads are automatically processed by Claude\n\n"
         "Need more help? Contact your administrator."
@@ -927,3 +930,50 @@ def _format_file_size(size: int) -> str:
             return f"{size:.1f}{unit}" if unit != "B" else f"{size}B"
         size /= 1024
     return f"{size:.1f}TB"
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /cancel command - stop active Claude operations."""
+    user_id = update.effective_user.id
+    settings: Settings = context.bot_data["settings"]
+    claude_integration: ClaudeIntegration = context.bot_data.get("claude_integration")
+    audit_logger: Optional[AuditLogger] = context.bot_data.get("audit_logger")
+
+    logger.info("Cancel command received", user_id=user_id)
+
+    if not claude_integration:
+        await update.message.reply_text(
+            "❌ **Claude integration not available**\n\n"
+            "The Claude Code integration is not properly configured.",
+            parse_mode="Markdown",
+        )
+        return
+
+    # Attempt to cancel active operations
+    success = await claude_integration.cancel_active_operations(user_id)
+
+    if success:
+        await update.message.reply_text(
+            "⏹️ **Operation Cancelled**\n\n"
+            "All active Claude operations have been stopped.\n\n"
+            "You can start a new task anytime.",
+            parse_mode="Markdown",
+        )
+        logger.info("Successfully cancelled operations", user_id=user_id)
+    else:
+        await update.message.reply_text(
+            "⚠️ **Cancel Failed**\n\n"
+            "Could not cancel active operations. They may have already completed.\n\n"
+            "Try using `/status` to check current state.",
+            parse_mode="Markdown",
+        )
+        logger.warning("Failed to cancel operations", user_id=user_id)
+
+    # Log the cancel action
+    if audit_logger:
+        await audit_logger.log_command(
+            user_id=user_id,
+            command="cancel",
+            args=[],
+            success=success,
+        )

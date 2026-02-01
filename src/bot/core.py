@@ -94,6 +94,7 @@ class ClaudeCodeBot:
             BotCommand("export", "Export current session"),
             BotCommand("actions", "Show quick actions"),
             BotCommand("git", "Git repository commands"),
+            BotCommand("cancel", "Cancel active operations"),
         ]
 
         await self.app.bot.set_my_commands(commands)
@@ -118,6 +119,7 @@ class ClaudeCodeBot:
             ("export", command.export_session),
             ("actions", command.quick_actions),
             ("git", command.git_command),
+            ("cancel", command.cancel_command),
         ]
 
         for cmd, handler in handlers:
