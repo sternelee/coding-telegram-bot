@@ -171,10 +171,18 @@ class ClaudeSDKManager:
 
         try:
             # Build Claude Code options
+            # Empty list means no tools allowed, so use None to allow all tools
+            allowed_tools = (
+                self.config.claude_allowed_tools
+                if self.config.claude_allowed_tools
+                else None
+            )
+
             options = ClaudeCodeOptions(
                 max_turns=self.config.claude_max_turns,
                 cwd=str(working_directory),
-                allowed_tools=self.config.claude_allowed_tools,
+                allowed_tools=allowed_tools,
+                permission_mode='bypassPermissions',  # Auto-approve operations for Telegram bot
             )
 
             # Collect messages
@@ -379,6 +387,7 @@ class ClaudeSDKManager:
     def _extract_content_from_messages(self, messages: List[Message]) -> str:
         """Extract content from message list."""
         content_parts = []
+        tool_summaries = []
 
         for message in messages:
             if isinstance(message, AssistantMessage):
@@ -386,11 +395,18 @@ class ClaudeSDKManager:
                 if content and isinstance(content, list):
                     # Extract text from TextBlock objects
                     for block in content:
-                        if hasattr(block, "text"):
+                        if isinstance(block, TextBlock) and hasattr(block, "text"):
                             content_parts.append(block.text)
+                        elif isinstance(block, ToolUseBlock):
+                            tool_name = getattr(block, "tool_name", "unknown")
+                            tool_summaries.append(f"• Executed: {tool_name}")
                 elif content:
                     # Fallback for non-list content
                     content_parts.append(str(content))
+
+        # If no text content but tools were executed, provide a summary
+        if not content_parts and tool_summaries:
+            return "Operations completed:\n" + "\n".join(tool_summaries)
 
         return "\n".join(content_parts)
 

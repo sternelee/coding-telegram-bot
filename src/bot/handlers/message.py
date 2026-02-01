@@ -1,6 +1,7 @@
 """Message handlers for non-command inputs."""
 
 import asyncio
+from datetime import datetime
 from typing import Optional
 
 import structlog
@@ -14,6 +15,11 @@ from ...security.rate_limiter import RateLimiter
 from ...security.validators import SecurityValidator
 
 logger = structlog.get_logger()
+
+# Progress display constants
+MAX_PROGRESS_ENTRIES = 5
+MAX_PROGRESS_LENGTH = 4000  # Telegram limit is 4096
+MIN_PROGRESS_ENTRIES = 3  # When truncating
 
 
 async def _format_progress_update(update_obj) -> Optional[str]:
@@ -66,10 +72,11 @@ async def _format_progress_update(update_obj) -> Optional[str]:
 
     elif update_obj.type == "assistant" and update_obj.content:
         # Regular content updates with preview
+        content = update_obj.content or ""
         content_preview = (
-            update_obj.content[:150] + "..."
-            if len(update_obj.content) > 150
-            else update_obj.content
+            content[:150] + "..."
+            if len(content) > 150
+            else content
         )
         return f"🤖 **Claude is working...**\n\n_{content_preview}_"
 
@@ -133,6 +140,12 @@ async def handle_text_message(
     """Handle regular text messages as Claude prompts."""
     user_id = update.effective_user.id
     message_text = update.message.text
+
+    # Validate message is not empty
+    if not message_text or not message_text.strip():
+        logger.debug("Ignoring empty message", user_id=user_id)
+        return
+
     settings: Settings = context.bot_data["settings"]
 
     # Get services
@@ -185,12 +198,34 @@ async def handle_text_message(
         # Get existing session ID
         session_id = context.user_data.get("claude_session_id")
 
-        # Enhanced stream updates handler with progress tracking
+        # Enhanced stream updates handler with cumulative progress tracking
+        progress_history = []  # Store all progress updates
+        last_progress_text = ""  # Track last update to avoid duplicates
+
         async def stream_handler(update_obj):
+            nonlocal last_progress_text
             try:
                 progress_text = await _format_progress_update(update_obj)
-                if progress_text:
-                    await progress_msg.edit_text(progress_text, parse_mode="Markdown")
+                if progress_text and progress_text != last_progress_text:
+                    # Add timestamp to each progress entry
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    progress_history.append(f"[{timestamp}] {progress_text}")
+                    last_progress_text = progress_text
+
+                    # Show latest MAX_PROGRESS_ENTRIES to avoid message too long
+                    recent_progress = progress_history[-MAX_PROGRESS_ENTRIES:]
+                    if len(progress_history) > MAX_PROGRESS_ENTRIES:
+                        recent_progress.insert(0, f"_(... {len(progress_history) - MAX_PROGRESS_ENTRIES} more updates)_")
+
+                    full_progress_text = "\n\n".join(recent_progress)
+
+                    # Check message length limits
+                    if len(full_progress_text) > MAX_PROGRESS_LENGTH:
+                        # Truncate to show only MIN_PROGRESS_ENTRIES
+                        recent_progress = progress_history[-MIN_PROGRESS_ENTRIES:]
+                        full_progress_text = "\n\n".join(recent_progress)
+
+                    await progress_msg.edit_text(full_progress_text, parse_mode="Markdown")
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
 
@@ -253,9 +288,6 @@ async def handle_text_message(
             formatted_messages = [
                 FormattedMessage(_format_error_message(str(e)), parse_mode="Markdown")
             ]
-
-        # Delete progress message
-        await progress_msg.delete()
 
         # Send formatted responses (may be multiple messages)
         for i, message in enumerate(formatted_messages):
@@ -342,11 +374,14 @@ async def handle_text_message(
         logger.info("Text message processed successfully", user_id=user_id)
 
     except Exception as e:
-        # Clean up progress message if it exists
+        # Update progress message with error
         try:
-            await progress_msg.delete()
-        except:
-            pass
+            await progress_msg.edit_text(
+                f"❌ **Error**\n\n{str(e)}",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass  # If we can't update progress message, continue with error handling
 
         error_msg = f"❌ **Error processing message**\n\n{str(e)}"
         await update.message.reply_text(error_msg, parse_mode="Markdown")
@@ -489,9 +524,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 )
                 return
 
-        # Delete progress message
-        await progress_msg.delete()
-
         # Create a new progress message for Claude processing
         claude_progress_msg = await update.message.reply_text(
             "🤖 Processing file with Claude...", parse_mode="Markdown"
@@ -539,9 +571,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 claude_response.content
             )
 
-            # Delete progress message
-            await claude_progress_msg.delete()
-
             # Send responses
             for i, message in enumerate(formatted_messages):
                 await update.message.reply_text(
@@ -571,11 +600,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
     except Exception as e:
-        try:
-            await progress_msg.delete()
-        except:
-            pass
-
         error_msg = f"❌ **Error processing file**\n\n{str(e)}"
         await update.message.reply_text(error_msg, parse_mode="Markdown")
 
@@ -615,9 +639,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             processed_image = await image_handler.process_image(
                 photo, update.message.caption
             )
-
-            # Delete progress message
-            await progress_msg.delete()
 
             # Create Claude progress message
             claude_progress_msg = await update.message.reply_text(
@@ -660,9 +681,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 formatted_messages = formatter.format_claude_response(
                     claude_response.content
                 )
-
-                # Delete progress message
-                await claude_progress_msg.delete()
 
                 # Send responses
                 for i, message in enumerate(formatted_messages):

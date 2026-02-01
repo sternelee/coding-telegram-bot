@@ -146,3 +146,5 @@ data/
 sessions/
 backups/
 uploads/
+logs/
+bot.pid

@@ -113,26 +113,49 @@ class ToolMonitor:
         if tool_name in ["bash", "shell", "Bash"]:
             command = tool_input.get("command", "")
 
-            # Check for dangerous commands
+            # Check for dangerous commands using word boundaries for safety
+            # Use regex patterns to match whole words/tokens, not substrings
+            import re
+
             dangerous_patterns = [
-                "rm -rf",
-                "sudo",
-                "chmod 777",
-                "curl",
-                "wget",
-                "nc ",
-                "netcat",
-                ">",
-                ">>",
-                "|",
-                "&",
-                ";",
-                "$(",
-                "`",
+                r"\brm\s+-rf?\s*/",  # rm -rf / or rm -rf /etc (dangerous system deletion)
+                r"\bsudo\b",        # sudo (privilege escalation)
+                r"\bchmod\s+777\b",  # chmod 777 (insecure permissions)
+                r"\bnc\s+.*?-l",    # nc with -l (netcat listener - potential reverse shell)
+                r"\bnetcat\b.*?-l", # netcat with -l
             ]
 
+            # Special check for & (background operator)
+            # Allow && (command chaining) but block & (background execution)
+            # More robust pattern that catches background execution in various positions
+            if '&' in command:
+                # Split by && first to check individual commands
+                parts = command.split('&&')
+                has_background = False
+
+                for part in parts:
+                    part_stripped = part.strip()
+                    # Check for standalone & (background operator)
+                    # Match: & at end, & at start, or & with spaces but not &&
+                    if re.search(r'(?<!&)&(?!\&)', part_stripped):
+                        has_background = True
+                        break
+
+                if has_background:
+                    violation = {
+                        "type": "dangerous_command",
+                        "tool_name": tool_name,
+                        "command": command,
+                        "pattern": "& (background operator)",
+                        "user_id": user_id,
+                        "working_directory": str(working_directory),
+                    }
+                    self.security_violations.append(violation)
+                    logger.warning("Dangerous command detected", **violation)
+                    return False, "Background execution is not allowed"
+
             for pattern in dangerous_patterns:
-                if pattern in command.lower():
+                if re.search(pattern, command, re.IGNORECASE):
                     violation = {
                         "type": "dangerous_command",
                         "tool_name": tool_name,

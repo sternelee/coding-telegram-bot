@@ -32,9 +32,13 @@ class ResponseFormatter:
         self.max_code_block_length = 3000  # Max length for code blocks
 
     def format_claude_response(
-        self, text: str, context: Optional[dict] = None
+        self, text: Optional[str], context: Optional[dict] = None
     ) -> List[FormattedMessage]:
         """Enhanced formatting with context awareness and semantic chunking."""
+        # Handle None or empty content
+        if not text:
+            return [FormattedMessage("_(No response from Claude)_")]
+
         # Clean and prepare text
         text = self._clean_text(text)
 
