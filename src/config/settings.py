@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     )
     anthropic_api_key: Optional[SecretStr] = Field(
         None,
-        description="Anthropic API key for Claude SDK (optional if logged into Claude CLI)",
+        description=(
+            "Anthropic API key for Claude SDK " "(optional if logged into Claude CLI)"
+        ),
     )
     claude_model: str = Field(
         "claude-3-5-sonnet-20241022", description="Claude model to use"
@@ -158,6 +160,22 @@ class Settings(BaseSettings):
         """Parse comma-separated user IDs."""
         if isinstance(v, str):
             return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("claude_allowed_tools", mode="before")
+    @classmethod
+    def parse_claude_allowed_tools(cls, v: Any) -> Optional[List[str]]:
+        """Parse comma-separated tool names."""
+        if isinstance(v, str):
+            return [tool.strip() for tool in v.split(",") if tool.strip()]
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("claude_disallowed_tools", mode="before")
+    @classmethod
+    def parse_claude_disallowed_tools(cls, v: Any) -> Optional[List[str]]:
+        """Parse comma-separated tool names."""
+        if isinstance(v, str):
+            return [tool.strip() for tool in v.split(",") if tool.strip()]
         return v  # type: ignore[no-any-return]
 
     @field_validator("approved_directory")
