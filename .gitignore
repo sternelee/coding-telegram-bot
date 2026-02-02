@@ -148,3 +148,5 @@ backups/
 uploads/
 logs/
 bot.pid
+
+.claude/tsc-cache

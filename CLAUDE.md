@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Telegram bot that provides remote access to Claude Code, enabling developers to interact with their code projects through Telegram. The bot features a terminal-like interface with directory navigation, file operations, Claude AI integration, session persistence, and advanced features like git integration and file uploads.
 
-**Tech Stack:** Python 3.9+, Poetry for dependency management, SQLite for persistence, python-telegram-bot for Telegram integration, Anthropic SDK for Claude AI access.
+**Tech Stack:** Python 3.10+, Poetry for dependency management, SQLite for persistence, python-telegram-bot v22+ for Telegram integration, Anthropic SDK for Claude AI access.
 
 ## Common Development Commands
 
@@ -25,11 +25,14 @@ cp .env.example .env
 # Normal mode
 make run
 
-# Debug mode (verbose logging)
+# Debug mode (verbose logging, human-readable output)
 make run-debug
 
 # Direct Poetry command
 poetry run claude-telegram-bot --debug
+
+# With custom config file
+poetry run claude-telegram-bot --config-file /path/to/config.env
 ```
 
 ### Testing
@@ -45,6 +48,12 @@ poetry run pytest --cov=src --cov-report=term-missing
 
 # Run async tests specifically
 poetry run pytest tests/unit/test_claude/test_sdk_integration.py -v
+
+# Run with verbose output
+poetry run pytest -v
+
+# Run specific test function
+poetry run pytest tests/unit/test_config.py::test_load_config
 ```
 
 ### Code Quality
@@ -119,9 +128,17 @@ Handlers receive dependencies through `context.bot_data`:
 - `rate_limiter`: Rate limit enforcement
 - `audit_logger`: Security event logging
 - `claude_integration`: Claude AI interface
-- `storage`: Database access
+- `storage`: Database access (Storage facade)
 - `settings`: Application configuration
-- `features`: Feature registry
+- `features`: Feature registry (access to file_handler, git, quick_actions, etc.)
+
+### Feature Registry Pattern
+
+The `FeatureRegistry` (`src/bot/features/registry.py`) provides centralized feature management:
+- Features are initialized based on configuration flags
+- Conditional features: file_uploads, git_integration, quick_actions
+- Always-enabled features: session_export, image_handler, conversation
+- Access features via `context.bot_data["features"].get_feature("name")`
 
 ### Middleware Pipeline
 
@@ -187,10 +204,16 @@ Mode selection happens in `main.py:create_application()` based on `config.use_sd
 
 ### Testing Strategy
 - Unit tests mirror `src/` structure in `tests/unit/`
-- Use `create_test_config()` from `src.config` for test configuration
+- Use `create_test_config()` from `src.config.loader` for test configuration
 - Async tests marked with `@pytest.mark.asyncio`
 - Fixtures in `tests/conftest.py` for shared test data
 - Target coverage: >85% (currently ~87%)
+
+### Test Configuration Helper
+The `create_test_config()` function in `src/config/loader.py` creates a Settings instance pre-configured for testing:
+- Automatically creates test directory at `/tmp/test_projects`
+- Accepts optional overrides via `**kwargs`
+- Returns a fully validated Settings instance
 
 ## File Organization Patterns
 
@@ -202,9 +225,11 @@ Mode selection happens in `main.py:create_application()` based on `config.use_sd
 
 ### Adding New Features
 1. Create feature module in `src/bot/features/`
-2. Register in `FeatureRegistry` (`src/bot/features/registry.py`)
-3. Enable via feature flag in `src/config/features.py`
-4. Add tests in `tests/unit/`
+2. Implement class with `__init__(self, config, ...)` pattern
+3. Register in `FeatureRegistry._initialize_features()` (`src/bot/features/registry.py`)
+4. Add feature flag to Settings (`src/config/settings.py`) if conditional
+5. Add getter method to `FeatureRegistry` if needed
+6. Add tests in `tests/unit/`
 
 ### Database Schema Changes
 1. Update models in `src/storage/models.py`
@@ -216,6 +241,10 @@ Mode selection happens in `main.py:create_application()` based on `config.use_sd
 
 - **Pre-commit Hooks**: Configured for Black, isort, flake8 (run `make dev` to install)
 - **Type Checking**: Strict mypy settings enabled - all code must have type hints
-- **Logging**: Use `structlog.get_logger()` for structured logging
+- **Logging**: Use `structlog.get_logger(__name__)` for structured logging
 - **Code Style**: Black 88-char line length, isort for imports
 - **Commit Format**: Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, etc.)
+
+## Python Version Support
+
+This project requires **Python 3.10 or higher** (as specified in pyproject.toml). The minimum version is enforced by Poetry's dependency configuration.
